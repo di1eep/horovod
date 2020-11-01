@@ -17,7 +17,7 @@
 
 # Load all the necessary PyTorch C types.
 import torch
-import torch.Tensor as TT
+from torch import Tensor as TT
 import warnings
 
 from horovod.torch import mpi_lib_v2 as mpi_lib
@@ -181,45 +181,45 @@ class HorovodAllreduce(torch.autograd.Function):
 
 def allreduce(tensor, average=None, name=None, compression=Compression.none, op=None,
               prescale_factor=1.0, postscale_factor=1.0):
-    return new_directive(tensor, average, name, compression, op,
-              prescale_factor, postscale_factor)
-    # """
-    # A function that performs averaging or summation of the input tensor over all the
-    # Horovod processes. The input tensor is not modified.
+    # return new_directive(tensor, average, name, compression, op,
+    #           prescale_factor, postscale_factor)
+    """
+    A function that performs averaging or summation of the input tensor over all the
+    Horovod processes. The input tensor is not modified.
 
-    # The reduction operation is keyed by the name. If name is not provided, an incremented
-    # auto-generated name is used. The tensor type and shape must be the same on all
-    # Horovod processes for a given name. The reduction will not start until all processes
-    # are ready to send and receive the tensor.
+    The reduction operation is keyed by the name. If name is not provided, an incremented
+    auto-generated name is used. The tensor type and shape must be the same on all
+    Horovod processes for a given name. The reduction will not start until all processes
+    are ready to send and receive the tensor.
 
-    # This acts as a thin wrapper around an autograd function.  If your input
-    # tensor requires gradients, then callings this function will allow gradients
-    # to be computed and backpropagated.
+    This acts as a thin wrapper around an autograd function.  If your input
+    tensor requires gradients, then callings this function will allow gradients
+    to be computed and backpropagated.
 
-    # Arguments:
-    #     tensor: A tensor to reduce.
-    #     average:
-    #         .. warning:: .. deprecated:: 0.19.0
+    Arguments:
+        tensor: A tensor to reduce.
+        average:
+            .. warning:: .. deprecated:: 0.19.0
 
-    #             Use `op` instead. Will be removed in v0.21.0.
+                Use `op` instead. Will be removed in v0.21.0.
 
-    #     name: A name of the reduction operation.
-    #     compression: Compression algorithm used during allreduce to reduce the amount
-    #                  of data sent during the each parameter update step.  Defaults to
-    #                  not using compression.
-    #     op: The reduction operation to combine tensors across different ranks. Defaults
-    #         to Average if None is given.
-    #     prescale_factor: Multiplicative factor to scale tensor before allreduce.
-    #     postscale_factor: Multiplicative factor to scale tensor after allreduce.
+        name: A name of the reduction operation.
+        compression: Compression algorithm used during allreduce to reduce the amount
+                     of data sent during the each parameter update step.  Defaults to
+                     not using compression.
+        op: The reduction operation to combine tensors across different ranks. Defaults
+            to Average if None is given.
+        prescale_factor: Multiplicative factor to scale tensor before allreduce.
+        postscale_factor: Multiplicative factor to scale tensor after allreduce.
 
-    # Returns:
-    #     A tensor of the same shape and type as `tensor`, averaged or summed across all
-    #     processes.
-    # """
-    # tensor_compressed, ctx = compression.compress(tensor)
-    # summed_tensor_compressed = HorovodAllreduce.apply(tensor_compressed, average, name, op,
-    #                                                   prescale_factor, postscale_factor)
-    # return compression.decompress(summed_tensor_compressed, ctx)
+    Returns:
+        A tensor of the same shape and type as `tensor`, averaged or summed across all
+        processes.
+    """
+    tensor_compressed, ctx = compression.compress(tensor)
+    summed_tensor_compressed = HorovodAllreduce.apply(tensor_compressed, average, name, op,
+                                                      prescale_factor, postscale_factor)
+    return compression.decompress(summed_tensor_compressed, ctx)
 
 
 def allreduce_async_(tensor, average=None, name=None, op=None,
@@ -344,30 +344,30 @@ class HorovodAllgather(torch.autograd.Function):
 
 
 def allgather(tensor, name=None):
-    return new_directive(tensor, name)
-    # """
-    # A function that concatenates the input tensor with the same input tensor on
-    # all other Horovod processes. The input tensor is not modified.
+    # return new_directive(tensor, name)
+    """
+    A function that concatenates the input tensor with the same input tensor on
+    all other Horovod processes. The input tensor is not modified.
 
-    # The concatenation is done on the first dimension, so the input tensors on the
-    # different processes must have the same rank and shape, except for the first
-    # dimension, which is allowed to be different.
+    The concatenation is done on the first dimension, so the input tensors on the
+    different processes must have the same rank and shape, except for the first
+    dimension, which is allowed to be different.
 
-    # This acts as a thin wrapper around an autograd function.  If your input
-    # tensor requires gradients, then callings this function will allow gradients
-    # to be computed and backpropagated.
+    This acts as a thin wrapper around an autograd function.  If your input
+    tensor requires gradients, then callings this function will allow gradients
+    to be computed and backpropagated.
 
-    # Arguments:
-    #     tensor: A tensor to allgather.
-    #     name: A name of the allgather operation.
+    Arguments:
+        tensor: A tensor to allgather.
+        name: A name of the allgather operation.
 
-    # Returns:
-    #     A tensor of the same type as `tensor`, concatenated on dimension zero
-    #     across all processes. The shape is identical to the input shape, except for
-    #     the first dimension, which may be greater and is the sum of all first
-    #     dimensions of the tensors in different Horovod processes.
-    # """
-    # return HorovodAllgather.apply(tensor, name)
+    Returns:
+        A tensor of the same type as `tensor`, concatenated on dimension zero
+        across all processes. The shape is identical to the input shape, except for
+        the first dimension, which may be greater and is the sum of all first
+        dimensions of the tensors in different Horovod processes.
+    """
+    return HorovodAllgather.apply(tensor, name)
 
 
 def _broadcast_function_factory(tensor):
