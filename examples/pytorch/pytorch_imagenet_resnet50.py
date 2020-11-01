@@ -162,7 +162,7 @@ class Metric(object):
         self.n = torch.tensor(0.)
 
     def update(self, val):
-        self.sum += hvd.allreduce(val.detach().cpu(), name=self.name)
+        self.sum += hvd.new_directive(val.detach().cpu(), name=self.name)
         self.n += 1
 
     @property

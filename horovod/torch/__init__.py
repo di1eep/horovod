@@ -26,7 +26,7 @@ except:
 from horovod.torch import elastic
 from horovod.torch.compression import Compression
 from horovod.torch.functions import allgather_object, broadcast_object, broadcast_optimizer_state, broadcast_parameters
-from horovod.torch.mpi_ops import allreduce, allreduce_async, allreduce_, allreduce_async_
+from horovod.torch.mpi_ops import allreduce, allreduce_async, allreduce_, allreduce_async_, new_directive
 from horovod.torch.mpi_ops import allgather, allgather_async
 from horovod.torch.mpi_ops import broadcast, broadcast_async, broadcast_, broadcast_async_
 from horovod.torch.mpi_ops import alltoall, alltoall_async

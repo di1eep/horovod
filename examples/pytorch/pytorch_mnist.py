@@ -74,7 +74,7 @@ def train(epoch):
 
 def metric_average(val, name):
     tensor = torch.tensor(val)
-    avg_tensor = hvd.allreduce(tensor, name=name)
+    avg_tensor = hvd.new_directive(tensor, name=name)
     return avg_tensor.item()
 
 

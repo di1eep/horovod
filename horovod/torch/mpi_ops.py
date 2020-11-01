@@ -652,8 +652,9 @@ def join(device=-1):
 def new_directive(tensor, average=None, name=None, compression=Compression.none, op=None,
               prescale_factor=1.0, postscale_factor=1.0):
     
-    sparsity = (TT.numel(tensor) - TT.numel(TT.nonzero(tensor))) / TT.numel(tensor)
-
+    sparsity = (TT.numel(tensor) - TT.count_nonzero(tensor).item()) / TT.numel(tensor)
+    print(f'Sparsity is : {sparsity}')
+    print(f'Tensor is : {tensor}')
     # use allgather for sparse tensors
     if sparsity>0.75:
         """
@@ -678,6 +679,7 @@ def new_directive(tensor, average=None, name=None, compression=Compression.none,
             the first dimension, which may be greater and is the sum of all first
             dimensions of the tensors in different Horovod processes.
         """
+        print('NEW DIRECTIVE AllGather')
         return HorovodAllgather.apply(tensor, name)
     
     # use allreduce for non sparse tensors    
@@ -714,6 +716,7 @@ def new_directive(tensor, average=None, name=None, compression=Compression.none,
         A tensor of the same shape and type as `tensor`, averaged or summed across all
         processes.
     """
+    print('NEW DIRECTIVE AllReduce')
     tensor_compressed, ctx = compression.compress(tensor)
     summed_tensor_compressed = HorovodAllreduce.apply(tensor_compressed, average, name, op,
                                                       prescale_factor, postscale_factor)

@@ -101,8 +101,7 @@ require_list = ['cloudpickle', 'psutil', 'pyyaml', 'dataclasses;python_version<"
 # NOTE: do not use versions with +cpu or +gpu here as users would need to add --find-links to pip
 dev_require_list = ['tensorflow-cpu==1.15.0',
                     'keras==2.2.4',
-                    'torch==1.2.0',
-                    'torchvision==0.4.0',
+                    'torch==1.7.0',
                     'mxnet==1.5.0',
                     'pyspark==2.4.7']
 

@@ -174,6 +174,64 @@ class TorchTests(unittest.TestCase):
 
             assert torch.allclose(summed, multiplied, threshold), 'hvd.allreduce produces incorrect results'
 
+    def test_horovod_allreduce_2(self):
+        """Test that the allreduce correctly sums 1D, 2D, 3D tensors."""
+        hvd.init()
+        size = hvd.size()
+        rank = hvd.rank()
+        dtypes = self.filter_supported_types([torch.IntTensor, torch.LongTensor,
+                     torch.FloatTensor, torch.DoubleTensor, torch.HalfTensor])
+        if torch.cuda.is_available():
+            dtypes += [torch.cuda.IntTensor, torch.cuda.LongTensor,
+                       torch.cuda.FloatTensor, torch.cuda.DoubleTensor,
+                       torch.cuda.HalfTensor]
+        dims = [1, 2, 3]
+        for dtype, dim in itertools.product(dtypes, dims):
+            torch.manual_seed(1234)
+            tensor = torch.FloatTensor(*([17] * dim)).random_(-100, 100)
+            tensor = self.cast_and_place(tensor, dtype)
+            summed = hvd.new_directive(tensor, average=False)
+            tensor, summed = self.convert_cpu_fp16_to_fp32(tensor, summed)
+            multiplied = tensor * size
+
+            # Threshold for floating point equality depends on number of
+            # ranks, since we're comparing against precise multiplication.
+            if size <= 3 or dtype in [torch.IntTensor, torch.LongTensor,
+                                      torch.cuda.IntTensor, torch.cuda.LongTensor]:
+                threshold = 0
+            elif size < 10:
+                threshold = 1e-4
+            elif size < 15:
+                threshold = 5e-4
+            else:
+                break
+
+            assert torch.allclose(summed, multiplied, threshold), 'hvd.allreduce produces incorrect results'
+        
+        dtypes = [torch.ByteTensor, torch.CharTensor, torch.ShortTensor,
+                  torch.IntTensor, torch.LongTensor, torch.FloatTensor, torch.DoubleTensor,
+                  torch.HalfTensor]
+        if torch.cuda.is_available():
+            dtypes += [torch.cuda.ByteTensor, torch.cuda.CharTensor, torch.cuda.ShortTensor,
+                       torch.cuda.IntTensor, torch.cuda.LongTensor,
+                       torch.cuda.FloatTensor, torch.cuda.DoubleTensor,
+                       torch.cuda.HalfTensor]
+        dims = [1, 2, 3]
+        for dtype, dim in itertools.product(dtypes, dims):
+            tensor = torch.FloatTensor(*([17] * dim)).fill_(0).mul_(rank)
+            tensor = self.cast_and_place(tensor, dtype)
+            gathered = hvd.new_directive(tensor)
+            tensor, gathered = self.convert_cpu_fp16_to_fp32(tensor, gathered)
+
+            assert list(gathered.shape) == [17 * size] + [17] * (dim - 1)
+
+            for i in range(size):
+                rank_tensor = gathered[i * 17:(i + 1) * 17]
+                assert list(rank_tensor.shape) == [17] * dim, \
+                    'hvd.allgather produces incorrect gathered shape'
+                assert rank_tensor.data.min() == 0, 'hvd.allgather produces incorrect gathered tensor'
+                assert rank_tensor.data.max() == 0, 'hvd.allgather produces incorrect gathered tensor'
+
     def test_horovod_allreduce_average(self):
         """Test that the allreduce correctly averages 1D, 2D, 3D tensors."""
         hvd.init()
@@ -612,7 +670,9 @@ class TorchTests(unittest.TestCase):
         for dtype, dim in itertools.product(dtypes, dims):
             tensor = torch.FloatTensor(*([17] * dim)).fill_(1).mul_(rank)
             tensor = self.cast_and_place(tensor, dtype)
+            print(f'Tensor : {tensor}')
             gathered = hvd.allgather(tensor)
+            print(f'Gathered Tensor : {gathered}')
             tensor, gathered = self.convert_cpu_fp16_to_fp32(tensor, gathered)
 
             assert list(gathered.shape) == [17 * size] + [17] * (dim - 1)
