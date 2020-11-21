@@ -185,7 +185,7 @@ class TorchTests(unittest.TestCase):
             dtypes += [torch.cuda.IntTensor, torch.cuda.LongTensor,
                        torch.cuda.FloatTensor, torch.cuda.DoubleTensor,
                        torch.cuda.HalfTensor]
-        dims = [1, 2, 3]
+        dims = [1] #[1, 2, 3]
         for dtype, dim in itertools.product(dtypes, dims):
             torch.manual_seed(1234)
             tensor = torch.FloatTensor(*([17] * dim)).random_(-100, 100)
@@ -193,7 +193,7 @@ class TorchTests(unittest.TestCase):
             summed = hvd.new_directive(tensor, average=False)
             tensor, summed = self.convert_cpu_fp16_to_fp32(tensor, summed)
             multiplied = tensor * size
-
+            print(f'AllReduced : {summed}')
             # Threshold for floating point equality depends on number of
             # ranks, since we're comparing against precise multiplication.
             if size <= 3 or dtype in [torch.IntTensor, torch.LongTensor,
@@ -216,13 +216,14 @@ class TorchTests(unittest.TestCase):
                        torch.cuda.IntTensor, torch.cuda.LongTensor,
                        torch.cuda.FloatTensor, torch.cuda.DoubleTensor,
                        torch.cuda.HalfTensor]
-        dims = [1, 2, 3]
+        dims = [1] #[1, 2, 3]
         for dtype, dim in itertools.product(dtypes, dims):
             tensor = torch.FloatTensor(*([17] * dim)).fill_(0).mul_(rank)
             tensor = self.cast_and_place(tensor, dtype)
             gathered = hvd.new_directive(tensor)
             tensor, gathered = self.convert_cpu_fp16_to_fp32(tensor, gathered)
-
+            print(f'AllGathered : {gathered}')
+            print(f'list(gathered.shape) : {list(gathered.shape)}')
             assert list(gathered.shape) == [17 * size] + [17] * (dim - 1)
 
             for i in range(size):

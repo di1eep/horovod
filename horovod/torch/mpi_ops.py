@@ -18,6 +18,7 @@
 # Load all the necessary PyTorch C types.
 import torch
 from torch import Tensor as TT
+from torch import count_nonzero
 import warnings
 
 from horovod.torch import mpi_lib_v2 as mpi_lib
@@ -652,33 +653,39 @@ def join(device=-1):
 def new_directive(tensor, average=None, name=None, compression=Compression.none, op=None,
               prescale_factor=1.0, postscale_factor=1.0):
     
-    sparsity = (TT.numel(tensor) - TT.count_nonzero(tensor).item()) / TT.numel(tensor)
-    print(f'Sparsity is : {sparsity}')
+    sparsity = (TT.numel(tensor) - count_nonzero(tensor).item()) / TT.numel(tensor)
+    print(f'rank: {rank()} - sparsity_is : {sparsity}')
     print(f'Tensor is : {tensor}')
+    empty_tensor = torch.ones((1,), dtype=torch.int8)
+    vote_tensor = empty_tensor.new_tensor([1]) if sparsity>0.75 else empty_tensor.new_tensor([0])
+    print (f'rank: {rank()} - vote_tensor : {vote_tensor}')
+
+    voted_tensor = synchronize(allgather_async(vote_tensor))
+    print (f'rank: {rank()} - voted_tensor : {voted_tensor}')
     # use allgather for sparse tensors
     if sparsity>0.75:
-        """
-        A function that concatenates the input tensor with the same input tensor on
-        all other Horovod processes. The input tensor is not modified.
+        # """
+        # A function that concatenates the input tensor with the same input tensor on
+        # all other Horovod processes. The input tensor is not modified.
 
-        The concatenation is done on the first dimension, so the input tensors on the
-        different processes must have the same rank and shape, except for the first
-        dimension, which is allowed to be different.
+        # The concatenation is done on the first dimension, so the input tensors on the
+        # different processes must have the same rank and shape, except for the first
+        # dimension, which is allowed to be different.
 
-        This acts as a thin wrapper around an autograd function.  If your input
-        tensor requires gradients, then callings this function will allow gradients
-        to be computed and backpropagated.
+        # This acts as a thin wrapper around an autograd function.  If your input
+        # tensor requires gradients, then callings this function will allow gradients
+        # to be computed and backpropagated.
 
-        Arguments:
-            tensor: A tensor to allgather.
-            name: A name of the allgather operation.
+        # Arguments:
+        #     tensor: A tensor to allgather.
+        #     name: A name of the allgather operation.
 
-        Returns:
-            A tensor of the same type as `tensor`, concatenated on dimension zero
-            across all processes. The shape is identical to the input shape, except for
-            the first dimension, which may be greater and is the sum of all first
-            dimensions of the tensors in different Horovod processes.
-        """
+        # Returns:
+        #     A tensor of the same type as `tensor`, concatenated on dimension zero
+        #     across all processes. The shape is identical to the input shape, except for
+        #     the first dimension, which may be greater and is the sum of all first
+        #     dimensions of the tensors in different Horovod processes.
+        # """
         print('NEW DIRECTIVE AllGather')
         return HorovodAllgather.apply(tensor, name)
     
