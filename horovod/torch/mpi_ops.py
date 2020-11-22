@@ -20,6 +20,7 @@ import torch
 from torch import Tensor as TT
 from torch import count_nonzero
 import warnings
+import pdb; 
 
 from horovod.torch import mpi_lib_v2 as mpi_lib
 from horovod.common.basics import HorovodBasics as _HorovodBasics
@@ -657,13 +658,19 @@ def new_directive(tensor, average=None, name=None, compression=Compression.none,
     print(f'rank: {rank()} - sparsity_is : {sparsity}')
     print(f'Tensor is : {tensor}')
     empty_tensor = torch.ones((1,), dtype=torch.int8)
-    vote_tensor = empty_tensor.new_tensor([1]) if sparsity>0.75 else empty_tensor.new_tensor([0])
+    #vote for allgather
+    vote_tensor = empty_tensor.new_tensor([1]) if sparsity<0.75 else empty_tensor.new_tensor([0])
     print (f'rank: {rank()} - vote_tensor : {vote_tensor}')
-
+    # get all votes
     voted_tensor = synchronize(allgather_async(vote_tensor))
     print (f'rank: {rank()} - voted_tensor : {voted_tensor}')
     # use allgather for sparse tensors
-    if sparsity>0.75:
+    # print(dir(HorovodAllgather))
+    # pdb.set_trace()
+    # HorovodAllgather.apply(tensor, name)
+    consensus =  (TT.numel(voted_tensor) - count_nonzero(voted_tensor).item()) / TT.numel(voted_tensor)
+    print(f'consensus: {consensus}')
+    if consensus>0.5:
         # """
         # A function that concatenates the input tensor with the same input tensor on
         # all other Horovod processes. The input tensor is not modified.
