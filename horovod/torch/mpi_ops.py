@@ -15,13 +15,21 @@
 # limitations under the License.
 # ==============================================================================
 
+import collections
+import io
+
+from collections.abc import Iterable
+
+import cloudpickle
+
 # Load all the necessary PyTorch C types.
 import torch
 from torch import Tensor as TT
 from torch import count_nonzero
 import warnings
-import pdb; 
-
+import pdb
+import numpy as np
+from scipy.sparse import dok_matrix
 from horovod.torch import mpi_lib_v2 as mpi_lib
 from horovod.common.basics import HorovodBasics as _HorovodBasics
 _NULL = ""
@@ -671,6 +679,16 @@ def new_directive(tensor, average=None, name=None, compression=Compression.none,
     consensus =  (TT.numel(voted_tensor) - count_nonzero(voted_tensor).item()) / TT.numel(voted_tensor)
     print(f'consensus: {consensus}')
     if consensus>0.5:
+        numpy_fmt = tensor.numpy()
+        dok  = dok_matrix(np.asmatrix(numpy_fmt), dtype=numpy_fmt.dtype)
+        combined = allgather_object(dok)
+        # dk.astype(np.float32).toarray()
+        result = sum(combined)/size()
+        print(f'RESULT {type(result)}')
+        # print(f'RESULT {result.astype(np.float32).toarray()}')
+        a, = result.astype(np.float32).toarray()
+        print(f'RESULT DOK {list(torch.tensor(a).shape)}')
+
         # """
         # A function that concatenates the input tensor with the same input tensor on
         # all other Horovod processes. The input tensor is not modified.
@@ -695,6 +713,7 @@ def new_directive(tensor, average=None, name=None, compression=Compression.none,
         # """
         print('NEW DIRECTIVE AllGather')
         return HorovodAllgather.apply(tensor, name)
+        # return result
     
     # use allreduce for non sparse tensors    
     """
@@ -735,3 +754,39 @@ def new_directive(tensor, average=None, name=None, compression=Compression.none,
     summed_tensor_compressed = HorovodAllreduce.apply(tensor_compressed, average, name, op,
                                                       prescale_factor, postscale_factor)
     return compression.decompress(summed_tensor_compressed, ctx)
+
+
+def allgather_object(obj, name=None):
+    """
+    Serializes and allgathers an object from all other processes.
+
+    Arguments:
+        obj: An object capable of being serialized without losing any context.
+        name: Optional name to use during allgather, will default to the class
+              type.
+
+    Returns:
+        The list of objects that were allgathered across all ranks.
+    """
+    if name is None:
+        name = type(obj).__name__
+
+    def load(byte_array):
+        buf = io.BytesIO(byte_array.tobytes())
+        return cloudpickle.load(buf)
+
+    b = io.BytesIO()
+    cloudpickle.dump(obj, b)
+
+    t = torch.ByteTensor(bytearray(b.getvalue()))
+    sz = torch.IntTensor([t.shape[0]])
+
+    sizes = allgather(sz, name=name + '.sz').numpy()
+    gathered = allgather(t, name=name + '.t').numpy()
+
+    def select(i):
+        start = sum(sizes[:i])
+        end = start + sizes[i]
+        return gathered[start:end]
+
+    return [load(select(i)) for i in range(size())]

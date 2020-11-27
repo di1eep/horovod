@@ -18,22 +18,28 @@ import os
 import warnings
 
 from contextlib import contextmanager
-
+import pdb
 import torch
+from torch import Tensor as TT
+import numpy as np
+import io
+import cloudpickle
 
 from horovod.torch.compression import Compression
 from horovod.torch.mpi_ops import allreduce_async_
+from horovod.torch.mpi_ops import allgather_async
 from horovod.torch.mpi_ops import synchronize
 from horovod.torch.mpi_ops import size
 from horovod.torch.mpi_ops import Average, Adasum, Sum
 from horovod.torch.mpi_ops import rocm_built
-
+from horovod.torch.mpi_ops import allgather_object
 
 class _DistributedOptimizer(torch.optim.Optimizer):
     def __init__(self, params, named_parameters, compression,
                  backward_passes_per_step=1, op=Average,
                  gradient_predivide_factor=1.0):
         super(self.__class__, self).__init__(params)
+        pdb.set_trace()
         self._compression = compression
 
         if named_parameters is not None:
@@ -78,6 +84,7 @@ class _DistributedOptimizer(torch.optim.Optimizer):
             self._register_hooks()
 
     def load_state_dict(self, *args, **kwargs):
+        pdb.set_trace()
         self._handles = {}
         self._synchronized = False
         self._should_synchronize = True
@@ -101,6 +108,7 @@ class _DistributedOptimizer(torch.optim.Optimizer):
             self._allreduce_delay[p] = self.backward_passes_per_step
 
     def _register_hooks(self):
+        pdb.set_trace()
         for param_group in self.param_groups:
             for p in param_group['params']:
                 if p.requires_grad:
@@ -111,7 +119,58 @@ class _DistributedOptimizer(torch.optim.Optimizer):
                     grad_acc.register_hook(self._make_hook(p))
                     self._grad_accs.append(grad_acc)
 
+    def _newdirective_grad_async(self, p):
+        pdb.set_trace()
+        name = self._parameter_names.get(p)
+        tensor = p.grad
+        tensor_compressed, ctx = self._compression.compress(tensor)
+
+        if self.op == Average:
+           # Split average operation across pre/postscale factors
+           # C++ backend will apply additional 1 / size() factor to postscale_factor for op == Average.
+            prescale_factor = 1.0 / self.gradient_predivide_factor
+            postscale_factor = self.gradient_predivide_factor
+        else:
+            prescale_factor = 1.0
+            postscale_factor = 1.0
+
+        sparsity = (TT.numel(p) - count_nonzero(p).item()) / TT.numel(p)
+        empty_tensor = torch.ones((1,), dtype=torch.int8)
+        #vote for allgather
+        vote_tensor = empty_tensor.new_tensor([1]) if sparsity<0.75 else empty_tensor.new_tensor([0])
+        # get all votes
+        voted_tensor = synchronize(allgather_async(vote_tensor))
+        consensus =  (TT.numel(voted_tensor) - count_nonzero(voted_tensor).item()) / TT.numel(voted_tensor)
+        mpi_type = None
+
+        if consensus>0.5:
+            mpi_type = 'AG'
+            numpy_fmt = tensor.numpy()
+            dok  = dok_matrix(np.asmatrix(numpy_fmt), dtype=numpy_fmt.dtype)
+            name = type(dok).__name__
+
+            b = io.BytesIO()
+            cloudpickle.dump(obj, b)
+
+            t = torch.ByteTensor(bytearray(b.getvalue()))
+            sz = torch.IntTensor([t.shape[0]])
+
+            sizes = allgather_async(sz, name=name + '.sz').numpy()
+            gathered = allgather_async(t, name=name + '.t').numpy()
+
+            handle = (sizes, gathered)
+        else:
+            mpi_type = 'AR'
+            handle = allreduce_async_(tensor_compressed, name=name, op=self.op,
+                                  prescale_factor=prescale_factor,
+                                  postscale_factor=postscale_factor)
+
+        return handle, ctx, mpi_type
+
+
+
     def _allreduce_grad_async(self, p):
+        pdb.set_trace()
         name = self._parameter_names.get(p)
         tensor = p.grad
         tensor_compressed, ctx = self._compression.compress(tensor)
@@ -132,6 +191,7 @@ class _DistributedOptimizer(torch.optim.Optimizer):
 
     def _make_hook(self, p):
         def hook(*ignore):
+            pdb.set_trace()
             if p in self._handles and self._handles[p][0] is not None:
                 if self._allreduce_delay[p] <= 0:
                     raise AssertionError(
@@ -144,22 +204,45 @@ class _DistributedOptimizer(torch.optim.Optimizer):
             handle, ctx = None, None
             self._allreduce_delay[p] -= 1
             if self._allreduce_delay[p] == 0:
-                handle, ctx = self._allreduce_grad_async(p)
+                handle, ctx = self._newdirective_grad_async(p)
             self._handles[p] = (handle, ctx)
         return hook
 
     def synchronize(self):
         missing_p = self._requires_update - set(self._handles.keys())
         for p in missing_p:
-            handle, ctx = self._allreduce_grad_async(p)
+            handle, ctx = self._newdirective_grad_async(p)
             self._handles[p] = (handle, ctx)
 
         for p, (handle, ctx) in self._handles.items():
             if handle is None:
-                handle, ctx = self._allreduce_grad_async(p)
+                handle, ctx = self._newdirective_grad_async(p)
                 self._handles[p] = (handle, ctx)
-        for p, (handle, ctx) in self._handles.items():
-            output = synchronize(handle)
+        for p, (handle, ctx, mpi_type) in self._handles.items():
+
+            if mpi_type=='AG':
+                h_sizes, h_gathered = handle
+                sizes = synchronize(h_sizes)
+                gathered = synchronize(h_gathered)
+                
+                def load(byte_array):
+                    buf = io.BytesIO(byte_array.tobytes())
+                    return cloudpickle.load(buf)
+
+                def select(i):
+                    start = sum(sizes[:i])
+                    end = start + sizes[i]
+                    return gathered[start:end]
+
+                output = [load(select(i)) for i in range(size())] 
+                # averaging the summed gradients
+                output = sum(output)/size()
+                # convert to torch tensor 
+                output = torch.tensor(output.astype(np.float32).toarray())
+            else :
+                # mpi_type=='AR' here
+                output = synchronize(handle)
+            
             self._allreduce_delay[p] = self.backward_passes_per_step
             p.grad.set_(self._compression.decompress(output, ctx))
         self._handles.clear()
@@ -187,6 +270,7 @@ class _DistributedOptimizer(torch.optim.Optimizer):
             self._should_synchronize = True
 
     def step(self, closure=None):
+        pdb.set_trace()
         if self._should_synchronize:
             if self._synchronized:
                 warnings.warn("optimizer.step() called without "
@@ -378,7 +462,7 @@ class _DistributedAdasumOptimizer(torch.optim.Optimizer):
         return super(self.__class__, self).zero_grad()
 
 
-def DistributedOptimizer(HOROVOD_ELASTIC, named_parameters=None,
+def DistributedOptimizer(optimizer, named_parameters=None,
                          compression=Compression.none,
                          backward_passes_per_step=1,
                          op=Average,
