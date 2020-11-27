@@ -21,6 +21,7 @@ from contextlib import contextmanager
 import pdb
 import torch
 from torch import Tensor as TT
+from torch import count_nonzero
 import numpy as np
 import io
 import cloudpickle
@@ -39,7 +40,7 @@ class _DistributedOptimizer(torch.optim.Optimizer):
                  backward_passes_per_step=1, op=Average,
                  gradient_predivide_factor=1.0):
         super(self.__class__, self).__init__(params)
-        pdb.set_trace()
+        # pdb.set_trace()
         self._compression = compression
 
         if named_parameters is not None:
@@ -84,7 +85,7 @@ class _DistributedOptimizer(torch.optim.Optimizer):
             self._register_hooks()
 
     def load_state_dict(self, *args, **kwargs):
-        pdb.set_trace()
+        # pdb.set_trace()
         self._handles = {}
         self._synchronized = False
         self._should_synchronize = True
@@ -108,7 +109,7 @@ class _DistributedOptimizer(torch.optim.Optimizer):
             self._allreduce_delay[p] = self.backward_passes_per_step
 
     def _register_hooks(self):
-        pdb.set_trace()
+        # pdb.set_trace()
         for param_group in self.param_groups:
             for p in param_group['params']:
                 if p.requires_grad:
@@ -120,7 +121,7 @@ class _DistributedOptimizer(torch.optim.Optimizer):
                     self._grad_accs.append(grad_acc)
 
     def _newdirective_grad_async(self, p):
-        pdb.set_trace()
+        # pdb.set_trace()
         name = self._parameter_names.get(p)
         tensor = p.grad
         tensor_compressed, ctx = self._compression.compress(tensor)
@@ -134,7 +135,7 @@ class _DistributedOptimizer(torch.optim.Optimizer):
             prescale_factor = 1.0
             postscale_factor = 1.0
 
-        sparsity = (TT.numel(p) - count_nonzero(p).item()) / TT.numel(p)
+        sparsity = (TT.numel(tensor_compressed) - count_nonzero(tensor_compressed).item()) / TT.numel(tensor_compressed)
         empty_tensor = torch.ones((1,), dtype=torch.int8)
         #vote for allgather
         vote_tensor = empty_tensor.new_tensor([1]) if sparsity<0.75 else empty_tensor.new_tensor([0])
@@ -145,7 +146,8 @@ class _DistributedOptimizer(torch.optim.Optimizer):
 
         if consensus>0.5:
             mpi_type = 'AG'
-            numpy_fmt = tensor.numpy()
+            # uses the same underlying storage
+            numpy_fmt = tensor_compressed.numpy()
             dok  = dok_matrix(np.asmatrix(numpy_fmt), dtype=numpy_fmt.dtype)
             name = type(dok).__name__
 
@@ -170,7 +172,7 @@ class _DistributedOptimizer(torch.optim.Optimizer):
 
 
     def _allreduce_grad_async(self, p):
-        pdb.set_trace()
+        # pdb.set_trace()
         name = self._parameter_names.get(p)
         tensor = p.grad
         tensor_compressed, ctx = self._compression.compress(tensor)
@@ -191,7 +193,7 @@ class _DistributedOptimizer(torch.optim.Optimizer):
 
     def _make_hook(self, p):
         def hook(*ignore):
-            pdb.set_trace()
+            # pdb.set_trace()
             if p in self._handles and self._handles[p][0] is not None:
                 if self._allreduce_delay[p] <= 0:
                     raise AssertionError(
@@ -204,20 +206,20 @@ class _DistributedOptimizer(torch.optim.Optimizer):
             handle, ctx = None, None
             self._allreduce_delay[p] -= 1
             if self._allreduce_delay[p] == 0:
-                handle, ctx = self._newdirective_grad_async(p)
-            self._handles[p] = (handle, ctx)
+                handle, ctx, mpi_type = self._newdirective_grad_async(p)
+            self._handles[p] = (handle, ctx, mpi_type)
         return hook
 
     def synchronize(self):
         missing_p = self._requires_update - set(self._handles.keys())
         for p in missing_p:
-            handle, ctx = self._newdirective_grad_async(p)
-            self._handles[p] = (handle, ctx)
+            handle, ctx, mpi_type = self._newdirective_grad_async(p)
+            self._handles[p] = (handle, ctx, mpi_type)
 
-        for p, (handle, ctx) in self._handles.items():
+        for p, (handle, ctx, mpi_type) in self._handles.items():
             if handle is None:
-                handle, ctx = self._newdirective_grad_async(p)
-                self._handles[p] = (handle, ctx)
+                handle, ctx, mpi_type = self._newdirective_grad_async(p)
+                self._handles[p] = (handle, ctx, mpi_type)
         for p, (handle, ctx, mpi_type) in self._handles.items():
 
             if mpi_type=='AG':
@@ -270,7 +272,7 @@ class _DistributedOptimizer(torch.optim.Optimizer):
             self._should_synchronize = True
 
     def step(self, closure=None):
-        pdb.set_trace()
+        # pdb.set_trace()
         if self._should_synchronize:
             if self._synchronized:
                 warnings.warn("optimizer.step() called without "

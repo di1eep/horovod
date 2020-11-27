@@ -686,7 +686,7 @@ def new_directive(tensor, average=None, name=None, compression=Compression.none,
         result = sum(combined)/size()
         print(f'RESULT {type(result)}')
         # print(f'RESULT {result.astype(np.float32).toarray()}')
-        a, = result.astype(np.float32).toarray()
+        a = result.astype(np.float32).toarray()
         print(f'RESULT DOK {list(torch.tensor(a).shape)}')
 
         # """
@@ -712,8 +712,8 @@ def new_directive(tensor, average=None, name=None, compression=Compression.none,
         #     dimensions of the tensors in different Horovod processes.
         # """
         print('NEW DIRECTIVE AllGather')
-        return HorovodAllgather.apply(tensor, name)
-        # return result
+        # return HorovodAllgather.apply(tensor, name)
+        return torch.tensor(a)
     
     # use allreduce for non sparse tensors    
     """
