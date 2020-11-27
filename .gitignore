@@ -13,8 +13,9 @@ docs/_build
 
 env
 venv/
-
+data*
 examples/**/checkpoint*
+examples/**/data*
 
 horovod/tensorflow/mpi_lib.so
 horovod/torch/test_cuda/
