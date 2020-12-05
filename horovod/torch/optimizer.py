@@ -25,7 +25,7 @@ from torch import count_nonzero
 import numpy as np
 import io
 import cloudpickle
-
+from scipy.sparse import dok_matrix
 from horovod.torch.compression import Compression
 from horovod.torch.mpi_ops import allreduce_async_
 from horovod.torch.mpi_ops import allgather_async
@@ -145,6 +145,7 @@ class _DistributedOptimizer(torch.optim.Optimizer):
         mpi_type = None
 
         if consensus>0.5:
+            print(f'Param Name : {name} -> AG voted_tensor : {voted_tensor}')
             mpi_type = 'AG'
             # uses the same underlying storage
             numpy_fmt = tensor_compressed.numpy()
@@ -152,7 +153,7 @@ class _DistributedOptimizer(torch.optim.Optimizer):
             name = type(dok).__name__
 
             b = io.BytesIO()
-            cloudpickle.dump(obj, b)
+            cloudpickle.dump(dok, b)
 
             t = torch.ByteTensor(bytearray(b.getvalue()))
             sz = torch.IntTensor([t.shape[0]])
@@ -161,6 +162,7 @@ class _DistributedOptimizer(torch.optim.Optimizer):
             gathered = allgather_async(t, name=name + '.t').numpy()
 
             handle = (sizes, gathered)
+            print('Handles generated')
         else:
             mpi_type = 'AR'
             handle = allreduce_async_(tensor_compressed, name=name, op=self.op,
@@ -223,6 +225,7 @@ class _DistributedOptimizer(torch.optim.Optimizer):
         for p, (handle, ctx, mpi_type) in self._handles.items():
 
             if mpi_type=='AG':
+                print('AG Output creating')
                 h_sizes, h_gathered = handle
                 sizes = synchronize(h_sizes)
                 gathered = synchronize(h_gathered)
@@ -241,6 +244,7 @@ class _DistributedOptimizer(torch.optim.Optimizer):
                 output = sum(output)/size()
                 # convert to torch tensor 
                 output = torch.tensor(output.astype(np.float32).toarray())
+                print('AG Output created')
             else :
                 # mpi_type=='AR' here
                 output = synchronize(handle)

@@ -683,10 +683,13 @@ def new_directive(tensor, average=None, name=None, compression=Compression.none,
         dok  = dok_matrix(np.asmatrix(numpy_fmt), dtype=numpy_fmt.dtype)
         combined = allgather_object(dok)
         # dk.astype(np.float32).toarray()
-        result = sum(combined)/size()
-        print(f'RESULT {type(result)}')
+        # result = sum(combined)/size()
+        a = [e for r in combined for ele in r.astype(np.float32).toarray() for e in ele]
+        # a= sum(a)
+        # result = sum(combined)
+        # print(f'RESULT {type(result)}')
         # print(f'RESULT {result.astype(np.float32).toarray()}')
-        a = result.astype(np.float32).toarray()
+        # a = result.astype(np.float32).toarray()
         print(f'RESULT DOK {list(torch.tensor(a).shape)}')
 
         # """
