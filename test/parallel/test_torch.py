@@ -27,13 +27,13 @@ import time
 import json
 
 from collections.abc import Iterable
-
+import time
 import numpy as np
 import pytest
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+import scipy.sparse as sparse
 import horovod.torch as hvd
 
 from common import mpi_env_rank_and_size, temppath
@@ -232,6 +232,59 @@ class TorchTests(unittest.TestCase):
                     'hvd.allgather produces incorrect gathered shape'
                 assert rank_tensor.data.min() == 0, 'hvd.allgather produces incorrect gathered tensor'
                 assert rank_tensor.data.max() == 0, 'hvd.allgather produces incorrect gathered tensor'
+
+    def test_horovod_arag(self):
+        """Test that the allreduce correctly sums 1D, 2D, 3D tensors."""
+        hvd.init()
+        size = hvd.size()
+        rank = hvd.rank()
+        dtypes = self.filter_supported_types([torch.IntTensor, torch.LongTensor,
+                     torch.FloatTensor, torch.DoubleTensor, torch.HalfTensor])
+        if torch.cuda.is_available():
+            dtypes += [torch.cuda.IntTensor, torch.cuda.LongTensor,
+                       torch.cuda.FloatTensor, torch.cuda.DoubleTensor,
+                       torch.cuda.HalfTensor]
+        size_list = [10000,50000,100000,500000,1000000,5000000]
+        density_list = [1,0.9,0.8,0.7,0.6,0.5,0.4,0.3,0.2,0.1]
+        density_list.reverse()
+        mode = ['AG']
+
+        for mode,density,size in itertools.product(mode, density_list, size_list) :
+            t = torch.tensor(sparse.random(size, 100, density=float(density)).A, dtype=torch.float32)
+            # * np.random.randint(10, 100)
+            tensor = t.detach()
+
+            start_time = time.perf_counter()
+            summed = hvd.new_directive(tensor, average=False, mode=mode)
+            elapsed = time.perf_counter() - start_time
+            print(f"Mode {mode}, Size:{size}, Density:{density}, Duration:{elapsed:0.4f} seconds, shape {summed.size()}")
+
+        assert True
+        
+        # dtypes = [torch.ByteTensor, torch.CharTensor, torch.ShortTensor,
+        #           torch.IntTensor, torch.LongTensor, torch.FloatTensor, torch.DoubleTensor,
+        #           torch.HalfTensor]
+        # if torch.cuda.is_available():
+        #     dtypes += [torch.cuda.ByteTensor, torch.cuda.CharTensor, torch.cuda.ShortTensor,
+        #                torch.cuda.IntTensor, torch.cuda.LongTensor,
+        #                torch.cuda.FloatTensor, torch.cuda.DoubleTensor,
+        #                torch.cuda.HalfTensor]
+        # dims = [1] #[1, 2, 3]
+        # for dtype, dim in itertools.product(dtypes, dims):
+        #     tensor = torch.FloatTensor(*([17] * dim)).fill_(0).mul_(rank)
+        #     tensor = self.cast_and_place(tensor, dtype)
+        #     gathered = hvd.new_directive(tensor)
+        #     tensor, gathered = self.convert_cpu_fp16_to_fp32(tensor, gathered)
+        #     print(f'AllGathered : {gathered}')
+        #     print(f'list(gathered.shape) : {list(gathered.shape)}')
+        #     assert list(gathered.shape) == [17 * size] + [17] * (dim - 1)
+
+        #     for i in range(size):
+        #         rank_tensor = gathered[i * 17:(i + 1) * 17]
+        #         assert list(rank_tensor.shape) == [17] * dim, \
+        #             'hvd.allgather produces incorrect gathered shape'
+        #         assert rank_tensor.data.min() == 0, 'hvd.allgather produces incorrect gathered tensor'
+        #         assert rank_tensor.data.max() == 0, 'hvd.allgather produces incorrect gathered tensor'
 
     def test_horovod_allreduce_average(self):
         """Test that the allreduce correctly averages 1D, 2D, 3D tensors."""

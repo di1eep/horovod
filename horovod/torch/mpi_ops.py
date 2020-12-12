@@ -29,7 +29,8 @@ from torch import count_nonzero
 import warnings
 import pdb
 import numpy as np
-from scipy.sparse import dok_matrix
+import scipy.sparse as sparse
+# from scipy.sparse import dok_matrix
 from horovod.torch import mpi_lib_v2 as mpi_lib
 from horovod.common.basics import HorovodBasics as _HorovodBasics
 _NULL = ""
@@ -660,38 +661,40 @@ def join(device=-1):
 
 
 def new_directive(tensor, average=None, name=None, compression=Compression.none, op=None,
-              prescale_factor=1.0, postscale_factor=1.0):
+              prescale_factor=1.0, postscale_factor=1.0, mode=None):
     
-    sparsity = (TT.numel(tensor) - count_nonzero(tensor).item()) / TT.numel(tensor)
-    print(f'rank: {rank()} - sparsity_is : {sparsity}')
-    print(f'Tensor is : {tensor}')
-    empty_tensor = torch.ones((1,), dtype=torch.int8)
-    #vote for allgather
-    vote_tensor = empty_tensor.new_tensor([1]) if sparsity<0.75 else empty_tensor.new_tensor([0])
-    print (f'rank: {rank()} - vote_tensor : {vote_tensor}')
-    # get all votes
-    voted_tensor = synchronize(allgather_async(vote_tensor))
-    print (f'rank: {rank()} - voted_tensor : {voted_tensor}')
-    # use allgather for sparse tensors
-    # print(dir(HorovodAllgather))
-    # pdb.set_trace()
-    # HorovodAllgather.apply(tensor, name)
-    consensus =  (TT.numel(voted_tensor) - count_nonzero(voted_tensor).item()) / TT.numel(voted_tensor)
-    print(f'consensus: {consensus}')
-    if consensus>0.5:
-        numpy_fmt = tensor.numpy()
-        dok  = dok_matrix(np.asmatrix(numpy_fmt), dtype=numpy_fmt.dtype)
-        combined = allgather_object(dok)
+    # sparsity = (TT.numel(tensor) - count_nonzero(tensor).item()) / TT.numel(tensor)
+    # # print(f'rank: {rank()} - sparsity_is : {sparsity}')
+    # # print(f'Tensor is : {tensor}')
+    # empty_tensor = torch.ones((1,), dtype=torch.int8)
+    # #vote for allgather
+    # vote_tensor = empty_tensor.new_tensor([1]) if sparsity<0.75 else empty_tensor.new_tensor([0])
+    # # print (f'rank: {rank()} - vote_tensor : {vote_tensor}')
+    # # get all votes
+    # voted_tensor = synchronize(allgather_async(vote_tensor))
+    # # print (f'rank: {rank()} - voted_tensor : {voted_tensor}')
+    # # use allgather for sparse tensors
+    # # print(dir(HorovodAllgather))
+    # # pdb.set_trace()
+    # # HorovodAllgather.apply(tensor, name)
+    # consensus =  (TT.numel(voted_tensor) - count_nonzero(voted_tensor).item()) / TT.numel(voted_tensor)
+
+    # print(f'consensus: {consensus}')
+    # consensus>0.5
+    if mode=='AG':
+        # numpy_fmt = tensor.numpy()
+        # dok  = sparse.dok_matrix(np.asmatrix(numpy_fmt), dtype=numpy_fmt.dtype)
+        # combined = allgather_object(tensor)
         # dk.astype(np.float32).toarray()
         # result = sum(combined)/size()
-        a = [e for r in combined for ele in r.astype(np.float32).toarray() for e in ele]
+        # a = [e for r in combined for ele in r.astype(np.float32).toarray() for e in ele]
         # a= sum(a)
         # result = sum(combined)
         # print(f'RESULT {type(result)}')
         # print(f'RESULT {result.astype(np.float32).toarray()}')
         # a = result.astype(np.float32).toarray()
-        print(f'RESULT DOK {list(torch.tensor(a).shape)}')
-
+        # print(f'RESULT DOK {list(torch.tensor(a).shape)}')
+        
         # """
         # A function that concatenates the input tensor with the same input tensor on
         # all other Horovod processes. The input tensor is not modified.
@@ -714,9 +717,41 @@ def new_directive(tensor, average=None, name=None, compression=Compression.none,
         #     the first dimension, which may be greater and is the sum of all first
         #     dimensions of the tensors in different Horovod processes.
         # """
-        print('NEW DIRECTIVE AllGather')
+        # print('NEW DIRECTIVE AllGather')
+        # return torch.tensor(a)
+        # return result
         # return HorovodAllgather.apply(tensor, name)
-        return torch.tensor(a)
+
+        sparse = tensor.to_sparse()
+        indices = sparse.indices().contiguous()
+        values = sparse.values().contiguous()
+        # indices = sparse.indices()
+        # values = sparse.values()
+
+        ag_indices = HorovodAllgather.apply(indices, str(name)+'ind')
+        ind_dim_0_size = list(ag_indices.size())[0]
+        # print(f'ind_dim_0_size {ind_dim_0_size}')
+        # print(f'ind_dim_1_size {list(ag_indices.size())[1]}')
+        ind_split_size = int(ind_dim_0_size/size())
+        # print(f'split_size {split_size}')
+        ag_indices_split = torch.split(ag_indices,ind_split_size)
+
+        ag_values = HorovodAllgather.apply(values, str(name)+'val')
+        val_dim_0_size = list(ag_values.size())[0]
+        # print(f'val_dim_0_size {val_dim_0_size}')
+        # print(f'val_dim_1_size {list(ag_values.size())[1]}')
+        val_split_size = int(val_dim_0_size/size())
+        # print(f'split_size {split_size}')
+        ag_values_split = torch.split(ag_values,val_split_size)
+        # print(sparse.size())
+        result = []
+        for i,v in zip(ag_indices_split,ag_values_split):
+            result.append(torch.sparse.FloatTensor(i, v, tensor.size()).to_dense())
+        # print(result)
+        result = (sum(result))/size()
+        # res_tensor = torch.sparse.FloatTensor(ag_indices, ag_values, torch.Size([dim_0_size,dim_1_size])).to_dense()
+        return result
+
     
     # use allreduce for non sparse tensors    
     """
@@ -752,11 +787,12 @@ def new_directive(tensor, average=None, name=None, compression=Compression.none,
         A tensor of the same shape and type as `tensor`, averaged or summed across all
         processes.
     """
-    print('NEW DIRECTIVE AllReduce')
-    tensor_compressed, ctx = compression.compress(tensor)
-    summed_tensor_compressed = HorovodAllreduce.apply(tensor_compressed, average, name, op,
+    # print('NEW DIRECTIVE AllReduce')
+    # tensor_compressed, ctx = compression.compress(tensor)
+    summed_tensor_compressed = HorovodAllreduce.apply(tensor, average, name, op,
                                                       prescale_factor, postscale_factor)
-    return compression.decompress(summed_tensor_compressed, ctx)
+    # return compression.decompress(summed_tensor_compressed, ctx)
+    return summed_tensor_compressed
 
 
 def allgather_object(obj, name=None):
