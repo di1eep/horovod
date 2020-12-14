@@ -244,10 +244,40 @@ class TorchTests(unittest.TestCase):
             dtypes += [torch.cuda.IntTensor, torch.cuda.LongTensor,
                        torch.cuda.FloatTensor, torch.cuda.DoubleTensor,
                        torch.cuda.HalfTensor]
+        # size_list = [10000,50000,100000,500000,1000000,5000000]
+        # density_list = [0.1,0.09,0.08,0.07,0.06,0.05,0.04,0.03,0.02,0.01]
+        # density_list.reverse()
+        # mode = ['AG']
+
+        # for mode,density,size in itertools.product(mode, density_list, size_list) :
+        #     t = torch.tensor(sparse.random(size, 100, density=float(density)).A, dtype=torch.float32)
+        #     # * np.random.randint(10, 100)
+        #     tensor = t.detach()
+
+        #     start_time = time.perf_counter()
+        #     summed = hvd.new_directive(tensor, average=False, mode=mode, voting=0)
+        #     elapsed = time.perf_counter() - start_time
+        #     print(f"Mode {mode}, Size:{size}, Density:{density}, Duration:{elapsed:0.4f} seconds, shape {summed.size()}")
+
+        # size_list = [10000,50000,100000,500000,1000000,5000000]
+        # density_list = [0.1,0.09,0.08,0.07,0.06,0.05,0.04,0.03,0.02,0.01]
+        # density_list.reverse()
+        # mode = ['AR']
+
+        # for mode,density,size in itertools.product(mode, density_list, size_list) :
+        #     t = torch.tensor(sparse.random(size, 100, density=float(density)).A, dtype=torch.float32)
+        #     # * np.random.randint(10, 100)
+        #     tensor = t.detach()
+
+        #     start_time = time.perf_counter()
+        #     summed = hvd.new_directive(tensor, average=False, mode=mode, voting=0)
+        #     elapsed = time.perf_counter() - start_time
+        #     print(f"Mode {mode}, Size:{size}, Density:{density}, Duration:{elapsed:0.4f} seconds, shape {summed.size()}")
+        
         size_list = [10000,50000,100000,500000,1000000,5000000]
-        density_list = [1,0.9,0.8,0.7,0.6,0.5,0.4,0.3,0.2,0.1]
+        density_list = [0.1,0.09,0.08,0.07,0.06,0.05,0.04,0.03,0.02,0.01]
         density_list.reverse()
-        mode = ['AG']
+        mode = ['AR']
 
         for mode,density,size in itertools.product(mode, density_list, size_list) :
             t = torch.tensor(sparse.random(size, 100, density=float(density)).A, dtype=torch.float32)
@@ -255,9 +285,10 @@ class TorchTests(unittest.TestCase):
             tensor = t.detach()
 
             start_time = time.perf_counter()
-            summed = hvd.new_directive(tensor, average=False, mode=mode)
+            summed = hvd.new_directive(tensor, average=False, mode=mode, voting=1)
             elapsed = time.perf_counter() - start_time
             print(f"Mode {mode}, Size:{size}, Density:{density}, Duration:{elapsed:0.4f} seconds, shape {summed.size()}")
+
 
         assert True
         
